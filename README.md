@@ -1,0 +1,76 @@
+# 서울 날씨/미세먼지 텔레그램 알림
+
+서울(37.5665, 126.9780)의 오늘/주말 날씨와 미세먼지(PM10, PM2.5)를 Open-Meteo에서 조회해서 텔레그램으로 1건 메시지를 보내는 Node.js(TypeScript) 프로그램입니다.
+
+## 기능
+
+- 오늘 날씨: 최저/최고 기온
+- 오늘 오전/오후 미세먼지 평균
+  - 오전: 06:00~11:59 (KST)
+  - 오후: 12:00~17:59 (KST)
+- 가장 가까운 토/일(주말) 날씨: 각 날짜별 최저/최고 기온
+- 주말(토/일) 오전/오후 미세먼지 평균 (PM10 / PM2.5)
+- 콘솔 출력 + 텔레그램 동일 내용 전송
+- API 실패 시 실패 원인을 포함한 메시지 전송
+
+## 요구 환경
+
+- Node.js 18+
+
+## 설치
+
+```bash
+npm i
+```
+
+## 환경변수 (`.env`)
+
+프로젝트 루트의 `.env` 파일에 아래 값을 넣으세요.
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+
+기본 템플릿 파일이 포함되어 있습니다: `.env`
+
+예시:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=123456789:YOUR_BOT_TOKEN
+TELEGRAM_CHAT_ID=123456789
+```
+
+참고: `.env` 대신 `export` 방식도 사용할 수 있지만, 현재 프로젝트는 `.env`를 자동으로 읽도록 설정되어 있습니다.
+
+## 실행
+
+빌드:
+
+```bash
+npm run build
+```
+
+실행:
+
+```bash
+npm start
+```
+
+테스트:
+
+```bash
+npm test
+```
+
+## 동작 방식
+
+1. Open-Meteo Weather API에서 일별 최저/최고 기온 조회
+2. Open-Meteo Air Quality API에서 시간별 PM10/PM2.5 조회
+3. 날짜별로 그룹핑 후 오전/오후 평균 계산
+4. 오늘 + 가장 가까운 주말(토/일) 데이터로 메시지 생성
+5. Telegram Bot API `sendMessage`로 전송 (`parse_mode=HTML`, `disable_web_page_preview=true`)
+
+## 참고
+
+- 시간대는 `Asia/Seoul` 기준으로 계산합니다.
+- 값이 없으면 `데이터없음`으로 표시합니다.
+- 모든 수치는 보기 좋게 반올림하여 소수점 0~1자리로 표시합니다.
