@@ -8,6 +8,7 @@ const WEATHER_API_URL =
   `https://api.open-meteo.com/v1/forecast?latitude=${SEOUL_LATITUDE}` +
   `&longitude=${SEOUL_LONGITUDE}` +
   `&daily=temperature_2m_max,temperature_2m_min` +
+  `&hourly=temperature_2m,weather_code` +
   `&timezone=${encodeURIComponent(SEOUL_TIMEZONE)}`;
 
 const AIR_API_URL =
@@ -36,6 +37,13 @@ export interface AirDaySummary {
 export type WeatherByDate = Record<string, DailyTemperature>;
 export type AirPeriodSummaryByDate = Record<string, AirDaySummary>;
 
+export interface WeatherDayPeriodSummary {
+  temperature: PeriodAverage;
+  weatherCode: PeriodAverage;
+}
+
+export type WeatherPeriodByDate = Record<string, WeatherDayPeriodSummary>;
+
 export interface WeekendDates {
   saturday: string;
   sunday: string;
@@ -45,6 +53,7 @@ export interface BuildReportMessageInput {
   todayDate: string;
   weekend: WeekendDates;
   weatherByDate: WeatherByDate;
+  weatherPeriodsByDate: WeatherPeriodByDate;
   airByDate: AirPeriodSummaryByDate;
 }
 
@@ -53,6 +62,11 @@ interface WeatherApiResponse {
     time?: string[];
     temperature_2m_min?: Array<number | null>;
     temperature_2m_max?: Array<number | null>;
+  };
+  hourly?: {
+    time?: string[];
+    temperature_2m?: Array<number | null>;
+    weather_code?: Array<number | null>;
   };
 }
 
@@ -105,6 +119,13 @@ function emptyAirDaySummary(): AirDaySummary {
   return {
     pm10: { morning: null, afternoon: null },
     pm2_5: { morning: null, afternoon: null },
+  };
+}
+
+function emptyWeatherDayPeriodSummary(): WeatherDayPeriodSummary {
+  return {
+    temperature: { morning: null, afternoon: null },
+    weatherCode: { morning: null, afternoon: null },
   };
 }
 
@@ -279,6 +300,119 @@ export function aggregateAirQualityByDate(response: AirApiResponse): AirPeriodSu
   return result;
 }
 
+function representativeWeatherCode(values: number[]): NullableNumber {
+  if (values.length === 0) {
+    return null;
+  }
+
+  const counts = new Map<number, { count: number; firstIndex: number }>();
+  for (let i = 0; i < values.length; i += 1) {
+    const value = values[i];
+    const previous = counts.get(value);
+    if (previous) {
+      previous.count += 1;
+      continue;
+    }
+    counts.set(value, { count: 1, firstIndex: i });
+  }
+
+  let bestValue = values[0];
+  let bestCount = -1;
+  let bestIndex = Number.MAX_SAFE_INTEGER;
+
+  for (const [value, entry] of counts.entries()) {
+    if (
+      entry.count > bestCount ||
+      (entry.count === bestCount && entry.firstIndex < bestIndex)
+    ) {
+      bestValue = value;
+      bestCount = entry.count;
+      bestIndex = entry.firstIndex;
+    }
+  }
+
+  return bestValue;
+}
+
+export function aggregateWeatherPeriodsByDate(response: WeatherApiResponse): WeatherPeriodByDate {
+  const time = response.hourly?.time;
+  const temperature = response.hourly?.temperature_2m;
+  const weatherCode = response.hourly?.weather_code;
+
+  if (!Array.isArray(time) || !Array.isArray(temperature) || !Array.isArray(weatherCode)) {
+    throw new Error(
+      "Weather API 응답에 hourly.time/temperature_2m/weather_code 배열이 없습니다.",
+    );
+  }
+
+  if (time.length !== temperature.length || time.length !== weatherCode.length) {
+    throw new Error("Weather API hourly 응답 배열 길이가 일치하지 않습니다.");
+  }
+
+  type Bucket = {
+    temperature: { morning: number[]; afternoon: number[] };
+    weatherCode: { morning: number[]; afternoon: number[] };
+  };
+
+  const buckets: Record<string, Bucket> = {};
+
+  for (let i = 0; i < time.length; i += 1) {
+    const iso = time[i];
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):/.exec(iso);
+    if (!match) {
+      continue;
+    }
+
+    const date = match[1];
+    const hour = Number(match[2]);
+
+    if (!buckets[date]) {
+      buckets[date] = {
+        temperature: { morning: [], afternoon: [] },
+        weatherCode: { morning: [], afternoon: [] },
+      };
+    }
+
+    let period: keyof PeriodAverage | null = null;
+    if (hour >= 6 && hour <= 11) {
+      period = "morning";
+    } else if (hour >= 12 && hour <= 17) {
+      period = "afternoon";
+    }
+
+    if (!period) {
+      continue;
+    }
+
+    const tempValue = temperature[i];
+    const codeValue = weatherCode[i];
+
+    if (isFiniteNumber(tempValue)) {
+      buckets[date].temperature[period].push(tempValue);
+    }
+    if (isFiniteNumber(codeValue)) {
+      buckets[date].weatherCode[period].push(codeValue);
+    }
+  }
+
+  const result: WeatherPeriodByDate = {};
+
+  for (const [date, bucket] of Object.entries(buckets)) {
+    result[date] = {
+      temperature: {
+        morning: average(bucket.temperature.morning),
+        afternoon: average(bucket.temperature.afternoon),
+      },
+      weatherCode: {
+        morning: representativeWeatherCode(bucket.weatherCode.morning),
+        afternoon: representativeWeatherCode(bucket.weatherCode.afternoon),
+      },
+    };
+  }
+
+  return result;
+}
+
 function roundToOneDecimal(value: number): number {
   return Math.round((value + Number.EPSILON) * 10) / 10;
 }
@@ -302,33 +436,137 @@ function formatTemperature(value: NullableNumber): string {
   return `${formatRoundedNumber(value)}°C`;
 }
 
-function formatPeriodPair(period: PeriodAverage, includeUnit: boolean): string {
-  const pair = `${formatRoundedNumber(period.morning)} / ${formatRoundedNumber(period.afternoon)}`;
+function describeTemperature(value: NullableNumber): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (value <= -5) return "매우추움";
+  if (value <= 5) return "추움";
+  if (value <= 12) return "쌀쌀함";
+  if (value <= 19) return "선선함";
+  if (value <= 26) return "온화함";
+  if (value <= 31) return "더움";
+  return "매우더움";
+}
+
+function describeWeatherCode(value: NullableNumber): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (value === 0) return "맑음";
+  if (value === 1 || value === 2 || value === 3) return "흐림";
+  if (value === 45 || value === 48) return "안개";
+  if (
+    (value >= 51 && value <= 67) ||
+    (value >= 80 && value <= 82)
+  ) {
+    return "비";
+  }
+  if ((value >= 71 && value <= 77) || value === 85 || value === 86) {
+    return "눈";
+  }
+  if (value === 95 || value === 96 || value === 99) {
+    return "뇌우";
+  }
+
+  return "날씨정보없음";
+}
+
+function formatWeatherLabel(temperature: NullableNumber, weatherCode: NullableNumber): string {
+  const temperatureLabel = describeTemperature(temperature);
+  const weatherLabel = describeWeatherCode(weatherCode);
+
+  if (temperatureLabel && weatherLabel) {
+    return `${temperatureLabel}·${weatherLabel}`;
+  }
+  if (temperatureLabel) {
+    return temperatureLabel;
+  }
+  if (weatherLabel) {
+    return weatherLabel;
+  }
+  return "데이터없음";
+}
+
+function formatWeatherPeriodPair(summary: WeatherDayPeriodSummary): string {
+  return (
+    `${formatWeatherLabel(summary.temperature.morning, summary.weatherCode.morning)} / ` +
+    `${formatWeatherLabel(summary.temperature.afternoon, summary.weatherCode.afternoon)}`
+  );
+}
+
+function getPmGrade(kind: "pm10" | "pm2_5", value: NullableNumber): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (kind === "pm10") {
+    if (value <= 30) return "좋음";
+    if (value <= 80) return "보통";
+    if (value <= 150) return "나쁨";
+    return "매우나쁨";
+  }
+
+  if (value <= 15) return "좋음";
+  if (value <= 35) return "보통";
+  if (value <= 75) return "나쁨";
+  return "매우나쁨";
+}
+
+function formatPmValueWithGrade(kind: "pm10" | "pm2_5", value: NullableNumber): string {
+  if (value === null) {
+    return "데이터없음";
+  }
+
+  const grade = getPmGrade(kind, value);
+  return `${formatRoundedNumber(value)}(${grade})`;
+}
+
+function formatPmPeriodPair(
+  kind: "pm10" | "pm2_5",
+  period: PeriodAverage,
+  includeUnit: boolean,
+): string {
+  const pair = `${formatPmValueWithGrade(kind, period.morning)} / ${formatPmValueWithGrade(
+    kind,
+    period.afternoon,
+  )}`;
   return includeUnit ? `${pair} µg/m³` : pair;
 }
 
 export function buildReportMessage(input: BuildReportMessageInput): string {
   const todayWeather = input.weatherByDate[input.todayDate] ?? { min: null, max: null };
+  const todayWeatherPeriod =
+    input.weatherPeriodsByDate[input.todayDate] ?? emptyWeatherDayPeriodSummary();
   const todayAir = input.airByDate[input.todayDate] ?? emptyAirDaySummary();
 
   const saturdayWeather = input.weatherByDate[input.weekend.saturday] ?? { min: null, max: null };
   const sundayWeather = input.weatherByDate[input.weekend.sunday] ?? { min: null, max: null };
+  const saturdayWeatherPeriod =
+    input.weatherPeriodsByDate[input.weekend.saturday] ?? emptyWeatherDayPeriodSummary();
+  const sundayWeatherPeriod =
+    input.weatherPeriodsByDate[input.weekend.sunday] ?? emptyWeatherDayPeriodSummary();
   const saturdayAir = input.airByDate[input.weekend.saturday] ?? emptyAirDaySummary();
   const sundayAir = input.airByDate[input.weekend.sunday] ?? emptyAirDaySummary();
 
   const lines = [
     `[서울] 오늘(${input.todayDate})`,
     `🌡️ 최저/최고: ${formatTemperature(todayWeather.min)} / ${formatTemperature(todayWeather.max)}`,
-    `😷 미세먼지 PM10 오전/오후: ${formatPeriodPair(todayAir.pm10, true)}`,
-    `🫁 초미세먼지 PM2.5 오전/오후: ${formatPeriodPair(todayAir.pm2_5, true)}`,
+    `🌤️ 날씨 오전/오후: ${formatWeatherPeriodPair(todayWeatherPeriod)}`,
+    `😷 미세먼지 PM10 오전/오후: ${formatPmPeriodPair("pm10", todayAir.pm10, true)}`,
+    `🫁 초미세먼지 PM2.5 오전/오후: ${formatPmPeriodPair("pm2_5", todayAir.pm2_5, true)}`,
     "",
     "[주말]",
     `토(${input.weekend.saturday}) 🌡️ ${formatTemperature(saturdayWeather.min)} / ${formatTemperature(saturdayWeather.max)}`,
-    `  😷 PM10 오전/오후: ${formatPeriodPair(saturdayAir.pm10, false)}`,
-    `  🫁 PM2.5 오전/오후: ${formatPeriodPair(saturdayAir.pm2_5, false)}`,
+    `  🌤️ 날씨 오전/오후: ${formatWeatherPeriodPair(saturdayWeatherPeriod)}`,
+    `  😷 PM10 오전/오후: ${formatPmPeriodPair("pm10", saturdayAir.pm10, false)}`,
+    `  🫁 PM2.5 오전/오후: ${formatPmPeriodPair("pm2_5", saturdayAir.pm2_5, false)}`,
     `일(${input.weekend.sunday}) 🌡️ ${formatTemperature(sundayWeather.min)} / ${formatTemperature(sundayWeather.max)}`,
-    `  😷 PM10 오전/오후: ${formatPeriodPair(sundayAir.pm10, false)}`,
-    `  🫁 PM2.5 오전/오후: ${formatPeriodPair(sundayAir.pm2_5, false)}`,
+    `  🌤️ 날씨 오전/오후: ${formatWeatherPeriodPair(sundayWeatherPeriod)}`,
+    `  😷 PM10 오전/오후: ${formatPmPeriodPair("pm10", sundayAir.pm10, false)}`,
+    `  🫁 PM2.5 오전/오후: ${formatPmPeriodPair("pm2_5", sundayAir.pm2_5, false)}`,
   ];
 
   return lines.join("\n");
@@ -456,12 +694,14 @@ export async function main(): Promise<number> {
     ]);
 
     const weatherByDate = mapWeatherDailyByDate(weatherResponse);
+    const weatherPeriodsByDate = aggregateWeatherPeriodsByDate(weatherResponse);
     const airByDate = aggregateAirQualityByDate(airResponse);
 
     const message = buildReportMessage({
       todayDate,
       weekend,
       weatherByDate,
+      weatherPeriodsByDate,
       airByDate,
     });
 
