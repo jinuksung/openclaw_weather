@@ -523,7 +523,7 @@ function formatPmValueWithGrade(kind: "pm10" | "pm2_5", value: NullableNumber): 
   }
 
   const grade = getPmGrade(kind, value);
-  return `${formatRoundedNumber(value)}(${grade})`;
+  return `${grade}(${formatRoundedNumber(value)})µg/m³`;
 }
 
 function formatPmPeriodPair(
@@ -532,8 +532,8 @@ function formatPmPeriodPair(
   includeUnit: boolean,
 ): string {
   const lines = [
-    `- 오전: ${formatPmValueWithGrade(kind, period.morning)} µg/m³`,
-    `- 오후: ${formatPmValueWithGrade(kind,period.afternoon)} µg/m³`
+    `- 오전: ${formatPmValueWithGrade(kind, period.morning)}`,
+    `- 오후: ${formatPmValueWithGrade(kind,period.afternoon)}`
   ]
   const pair = lines.join("\n")
   return includeUnit ? `${pair} µg/m³` : pair;
@@ -555,7 +555,8 @@ export function buildReportMessage(input: BuildReportMessageInput): string {
   const sundayAir = input.airByDate[input.weekend.sunday] ?? emptyAirDaySummary();
 
   const lines = [
-    `[서울] 오늘(${input.todayDate})`,
+    `[서울]`,
+    `오늘(${input.todayDate})`,
     `🌡️ 기온`,
     `- 최저: ${formatTemperature(todayWeather.min)}`,
     `- 최고: ${formatTemperature(todayWeather.max)}`,
