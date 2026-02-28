@@ -491,10 +491,12 @@ function formatWeatherLabel(temperature: NullableNumber, weatherCode: NullableNu
 }
 
 function formatWeatherPeriodPair(summary: WeatherDayPeriodSummary): string {
-  return (
-    `${formatWeatherLabel(summary.temperature.morning, summary.weatherCode.morning)} / ` +
-    `${formatWeatherLabel(summary.temperature.afternoon, summary.weatherCode.afternoon)}`
-  );
+
+  const lines = [
+    `- 오전: ${formatWeatherLabel(summary.temperature.morning, summary.weatherCode.morning)}`,
+    `- 오후: ${formatWeatherLabel(summary.temperature.afternoon, summary.weatherCode.afternoon)}`
+  ]
+  return lines.join("\n");
 }
 
 function getPmGrade(kind: "pm10" | "pm2_5", value: NullableNumber): string | null {
@@ -529,10 +531,11 @@ function formatPmPeriodPair(
   period: PeriodAverage,
   includeUnit: boolean,
 ): string {
-  const pair = `${formatPmValueWithGrade(kind, period.morning)} / ${formatPmValueWithGrade(
-    kind,
-    period.afternoon,
-  )}`;
+  const lines = [
+    `- 오전: ${formatPmValueWithGrade(kind, period.morning)} µg/m³`,
+    `- 오후: ${formatPmValueWithGrade(kind,period.afternoon)} µg/m³`
+  ]
+  const pair = lines.join("\n")
   return includeUnit ? `${pair} µg/m³` : pair;
 }
 
@@ -553,20 +556,38 @@ export function buildReportMessage(input: BuildReportMessageInput): string {
 
   const lines = [
     `[서울] 오늘(${input.todayDate})`,
-    `🌡️ 최저/최고: ${formatTemperature(todayWeather.min)} / ${formatTemperature(todayWeather.max)}`,
-    `🌤️ 날씨 오전/오후: ${formatWeatherPeriodPair(todayWeatherPeriod)}`,
-    `😷 미세먼지 PM10 오전/오후: ${formatPmPeriodPair("pm10", todayAir.pm10, true)}`,
-    `🫁 초미세먼지 PM2.5 오전/오후: ${formatPmPeriodPair("pm2_5", todayAir.pm2_5, true)}`,
+    `🌡️ 기온`,
+    `- 최저: ${formatTemperature(todayWeather.min)}`,
+    `- 최고: ${formatTemperature(todayWeather.max)}`,
+    `🌤️ 날씨`,
+    `${formatWeatherPeriodPair(todayWeatherPeriod)}`,
+    `😷 미세먼지`,
+    `${formatPmPeriodPair("pm10", todayAir.pm10, false)}`,
+    `🫁 초미세먼지`,
+    `${formatPmPeriodPair("pm2_5", todayAir.pm2_5, false)}`,
     "",
     "[주말]",
-    `토(${input.weekend.saturday}) 🌡️ ${formatTemperature(saturdayWeather.min)} / ${formatTemperature(saturdayWeather.max)}`,
-    `  🌤️ 날씨 오전/오후: ${formatWeatherPeriodPair(saturdayWeatherPeriod)}`,
-    `  😷 PM10 오전/오후: ${formatPmPeriodPair("pm10", saturdayAir.pm10, false)}`,
-    `  🫁 PM2.5 오전/오후: ${formatPmPeriodPair("pm2_5", saturdayAir.pm2_5, false)}`,
-    `일(${input.weekend.sunday}) 🌡️ ${formatTemperature(sundayWeather.min)} / ${formatTemperature(sundayWeather.max)}`,
-    `  🌤️ 날씨 오전/오후: ${formatWeatherPeriodPair(sundayWeatherPeriod)}`,
-    `  😷 PM10 오전/오후: ${formatPmPeriodPair("pm10", sundayAir.pm10, false)}`,
-    `  🫁 PM2.5 오전/오후: ${formatPmPeriodPair("pm2_5", sundayAir.pm2_5, false)}`,
+    `토(${input.weekend.saturday})`,
+    `🌡️ 기온`,
+    `- 최저: ${formatTemperature(saturdayWeather.min)}`,
+    `- 최고: ${formatTemperature(saturdayWeather.max)}`,
+    `🌤️ 날씨`,
+    `${formatWeatherPeriodPair(saturdayWeatherPeriod)}`,
+    `😷 미세먼지`,
+    `${formatPmPeriodPair("pm10", saturdayAir.pm10, false)}`,
+    `🫁 초미세먼지`,
+    `${formatPmPeriodPair("pm2_5", saturdayAir.pm2_5, false)}`,
+    "",
+    `일(${input.weekend.sunday})`,
+    `🌡️ 기온`,
+    `- 최저: ${formatTemperature(sundayWeather.min)}`,
+    `- 최고: ${formatTemperature(sundayWeather.max)}`,
+    `🌤️ 날씨`,
+    `${formatWeatherPeriodPair(sundayWeatherPeriod)}`,
+    `😷 미세먼지`,
+    `${formatPmPeriodPair("pm10", sundayAir.pm10, false)}`,
+    `🫁 초미세먼지`,
+    `${formatPmPeriodPair("pm2_5", sundayAir.pm2_5, false)}`,
   ];
 
   return lines.join("\n");
