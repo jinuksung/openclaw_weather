@@ -523,7 +523,7 @@ function formatPmValueWithGrade(kind: "pm10" | "pm2_5", value: NullableNumber): 
   }
 
   const grade = getPmGrade(kind, value);
-  return `${grade}(${formatRoundedNumber(value)})µg/m³`;
+  return `${grade}(${formatRoundedNumber(value)}µg/m³)`;
 }
 
 function formatPmPeriodPair(
